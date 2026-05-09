@@ -1,15 +1,20 @@
-from rest_framework import filters, status
+from rest_framework import filters, mixins, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.viewsets import GenericViewSet, ModelViewSet
 
 from apps.core.views import TenantViewSetMixin
 from .models import Movimiento, Producto
-from .serializers import MovimientoCreateSerializer, MovimientoSerializer, ProductoSerializer
+from .serializers import (
+    MovimientoCreateGlobalSerializer,
+    MovimientoCreateSerializer,
+    MovimientoSerializer,
+    ProductoSerializer,
+)
 
 
 class ProductoViewSet(TenantViewSetMixin, ModelViewSet):
-    queryset = Producto.objects.select_related('proveedor').all()
+    queryset = Producto.objects.select_related('proveedor').filter(activo=True)
     serializer_class = ProductoSerializer
     filter_backends = [filters.SearchFilter]
     search_fields = ['nombre']
@@ -49,3 +54,32 @@ class ProductoViewSet(TenantViewSetMixin, ModelViewSet):
         ).select_related('creado_por')
         serializer = MovimientoSerializer(movimientos, many=True)
         return Response(serializer.data)
+
+
+class MovimientoViewSet(
+    TenantViewSetMixin,
+    mixins.CreateModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.ListModelMixin,
+    GenericViewSet,
+):
+    queryset = Movimiento.objects.select_related('producto', 'creado_por').all()
+    serializer_class = MovimientoSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['producto__nombre']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        tipo = self.request.query_params.get('tipo')
+        if tipo:
+            qs = qs.filter(tipo=tipo)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        serializer = MovimientoCreateGlobalSerializer(
+            data=request.data,
+            context={'request': request},
+        )
+        serializer.is_valid(raise_exception=True)
+        movimiento = serializer.save()
+        return Response(MovimientoSerializer(movimiento).data, status=status.HTTP_201_CREATED)

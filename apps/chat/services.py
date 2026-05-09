@@ -179,31 +179,40 @@ def confirmar_accion(propuesta, negocio, usuario):
     return handler(datos, negocio)
 
 
+def _format_for_flutter(propuesta):
+    return {
+        'ok': True,
+        'accion': propuesta.get('accion'),
+        'resumen': propuesta.get('resumen', ''),
+        'datos': propuesta.get('datos', {}),
+    }
+
+
 def _confirmar_movimiento(datos, negocio, usuario):
     producto = _buscar_producto(datos['producto'], negocio)
     tipo = datos['tipo']
     cantidad = Decimal(str(datos['cantidad']))
     nota = datos.get('nota', '')
-
-    if tipo == 'salida' and producto.stock_actual < cantidad:
-        raise ValueError(
-            f'Stock insuficiente. Disponible: {producto.stock_actual} {producto.unidad}'
-        )
-
     delta = cantidad if tipo == 'entrada' else -cantidad
 
     with transaction.atomic():
+        producto_lock = Producto.objects.select_for_update().get(pk=producto.pk)
+        if tipo == 'salida' and producto_lock.stock_actual < cantidad:
+            raise ValueError(
+                f'Stock insuficiente. Disponible: {producto_lock.stock_actual} {producto_lock.unidad}'
+            )
         movimiento = Movimiento.objects.create(
             negocio=negocio,
-            producto=producto,
+            producto=producto_lock,
             tipo=tipo,
             cantidad=cantidad,
             nota=nota,
             creado_por=usuario,
         )
-        Producto.objects.filter(pk=producto.pk).update(stock_actual=F('stock_actual') + delta)
+        Producto.objects.filter(pk=producto_lock.pk).update(stock_actual=F('stock_actual') + delta)
 
     return {
+        'ok': True,
         'tipo': 'movimiento',
         'id': str(movimiento.id),
         'detalle': f'{tipo.capitalize()} de {cantidad} {producto.unidad} de {producto.nombre} registrada.',
@@ -224,6 +233,7 @@ def _confirmar_crear_producto(datos, negocio):
         proveedor=proveedor,
     )
     return {
+        'ok': True,
         'tipo': 'producto',
         'id': str(producto.id),
         'detalle': f'Producto "{producto.nombre}" creado correctamente.',
@@ -239,6 +249,7 @@ def _confirmar_crear_proveedor(datos, negocio):
         contacto=datos.get('contacto', ''),
     )
     return {
+        'ok': True,
         'tipo': 'proveedor',
         'id': str(proveedor.id),
         'detalle': f'Proveedor "{proveedor.nombre}" creado correctamente.',
@@ -257,6 +268,7 @@ def _confirmar_actualizar_producto(datos, negocio):
 
     producto.save()
     return {
+        'ok': True,
         'tipo': 'producto',
         'id': str(producto.id),
         'detalle': f'Producto "{producto.nombre}" actualizado correctamente.',
@@ -299,6 +311,7 @@ def _confirmar_venta(datos, negocio, usuario):
         DetalleVenta.objects.bulk_create(detalles_objs)
 
     return {
+        'ok': True,
         'tipo': 'venta',
         'id': str(venta.id),
         'detalle': f'Venta de ${total} registrada correctamente.',

@@ -66,13 +66,66 @@ class MovimientoCreateSerializer(serializers.Serializer):
             delta = -delta
 
         with transaction.atomic():
+            producto_lock = Producto.objects.select_for_update().get(pk=producto.pk)
+            if validated_data['tipo'] == 'salida' and producto_lock.stock_actual < validated_data['cantidad']:
+                raise serializers.ValidationError(
+                    {'cantidad': f'Stock insuficiente. Disponible: {producto_lock.stock_actual}'}
+                )
             movimiento = Movimiento.objects.create(
                 negocio=negocio,
-                producto=producto,
+                producto=producto_lock,
                 creado_por=usuario,
                 **validated_data,
             )
             Producto.objects.filter(pk=producto.pk).update(
+                stock_actual=F('stock_actual') + delta
+            )
+        return movimiento
+
+
+class MovimientoCreateGlobalSerializer(serializers.Serializer):
+    producto = serializers.PrimaryKeyRelatedField(queryset=Producto.objects.none())
+    tipo = serializers.ChoiceField(choices=['entrada', 'salida'])
+    cantidad = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal('0.001'))
+    nota = serializers.CharField(required=False, default='', allow_blank=True)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        if request and hasattr(request.user, 'negocio'):
+            self.fields['producto'].queryset = Producto.objects.filter(
+                negocio=request.user.negocio, activo=True, categoria='insumo'
+            )
+
+    def validate(self, attrs):
+        if attrs['tipo'] == 'salida' and attrs['producto'].stock_actual < attrs['cantidad']:
+            raise serializers.ValidationError(
+                {'cantidad': f'Stock insuficiente. Disponible: {attrs["producto"].stock_actual}'}
+            )
+        return attrs
+
+    def create(self, validated_data):
+        producto = validated_data.pop('producto')
+        negocio = self.context['request'].user.negocio
+        usuario = self.context['request'].user
+
+        delta = validated_data['cantidad']
+        if validated_data['tipo'] == 'salida':
+            delta = -delta
+
+        with transaction.atomic():
+            producto_lock = Producto.objects.select_for_update().get(pk=producto.pk)
+            if validated_data['tipo'] == 'salida' and producto_lock.stock_actual < validated_data['cantidad']:
+                raise serializers.ValidationError(
+                    {'cantidad': f'Stock insuficiente. Disponible: {producto_lock.stock_actual}'}
+                )
+            movimiento = Movimiento.objects.create(
+                negocio=negocio,
+                producto=producto_lock,
+                creado_por=usuario,
+                **validated_data,
+            )
+            Producto.objects.filter(pk=producto_lock.pk).update(
                 stock_actual=F('stock_actual') + delta
             )
         return movimiento

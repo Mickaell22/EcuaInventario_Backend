@@ -13,7 +13,7 @@ class ChatMensajeView(APIView):
             return Response({'error': 'El campo "mensaje" es requerido.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
             propuesta = services.procesar_mensaje(texto, request.user.negocio)
-            return Response(propuesta)
+            return Response(services._format_for_flutter(propuesta))
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -28,8 +28,9 @@ class ChatAudioView(APIView):
         try:
             texto = services.transcribir_audio(audio)
             propuesta = services.procesar_mensaje(texto, request.user.negocio)
-            propuesta['transcripcion'] = texto
-            return Response(propuesta)
+            respuesta = services._format_for_flutter(propuesta)
+            respuesta['transcripcion'] = texto
+            return Response(respuesta)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -43,7 +44,7 @@ class ChatFotoView(APIView):
             return Response({'error': 'Se requiere una imagen.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
             propuesta = services.procesar_foto(foto, request.user.negocio)
-            return Response(propuesta)
+            return Response(services._format_for_flutter(propuesta))
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

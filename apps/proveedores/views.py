@@ -8,7 +8,7 @@ from .serializers import ProveedorSerializer
 
 
 class ProveedorViewSet(TenantViewSetMixin, ModelViewSet):
-    queryset = Proveedor.objects.all()
+    queryset = Proveedor.objects.filter(activo=True)
     serializer_class = ProveedorSerializer
     filter_backends = [filters.SearchFilter]
     search_fields = ['nombre', 'contacto']

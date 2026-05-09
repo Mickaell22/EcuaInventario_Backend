@@ -1,4 +1,6 @@
-from django.db.models import F, Sum
+from decimal import Decimal
+
+from django.db.models import DecimalField, ExpressionWrapper, F, Sum
 from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -13,14 +15,30 @@ class DashboardView(APIView):
         negocio = request.user.negocio
         hoy = timezone.now().date()
 
-        total_ventas_hoy = (
+        ingresos = (
             Venta.objects.for_tenant(negocio)
             .filter(fecha__date=hoy)
             .aggregate(total=Sum('total'))['total']
-            or 0
+            or Decimal('0')
         )
 
-        alertas_stock = Producto.objects.for_tenant(negocio).filter(
+        gastos = (
+            Movimiento.objects.for_tenant(negocio)
+            .filter(creado_en__date=hoy, tipo='entrada')
+            .aggregate(
+                total=Sum(
+                    ExpressionWrapper(
+                        F('cantidad') * F('producto__costo'),
+                        output_field=DecimalField(max_digits=14, decimal_places=4),
+                    )
+                )
+            )['total']
+            or Decimal('0')
+        )
+
+        utilidad = ingresos - gastos
+
+        productos_criticos = Producto.objects.for_tenant(negocio).filter(
             activo=True,
             stock_actual__lte=F('stock_minimo'),
         ).select_related('proveedor')
@@ -32,10 +50,15 @@ class DashboardView(APIView):
 
         return Response(
             {
-                'total_ventas_hoy': total_ventas_hoy,
-                'alertas_stock': ProductoSerializer(
-                    alertas_stock, many=True, context={'request': request}
-                ).data,
+                'ingresos': ingresos,
+                'gastos': gastos,
+                'utilidad': utilidad,
+                'stock_critico': {
+                    'count': productos_criticos.count(),
+                    'productos': ProductoSerializer(
+                        productos_criticos, many=True, context={'request': request}
+                    ).data,
+                },
                 'ultimos_movimientos': MovimientoSerializer(
                     ultimos_movimientos, many=True
                 ).data,

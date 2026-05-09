@@ -24,6 +24,14 @@ class VentaCreateSerializer(serializers.Serializer):
     nota = serializers.CharField(required=False, default='', allow_blank=True)
     detalles = DetalleVentaInputSerializer(many=True)
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        if request and hasattr(request.user, 'negocio'):
+            self.fields['detalles'].child.fields['producto'].queryset = Producto.objects.filter(
+                negocio=request.user.negocio, activo=True, categoria='plato'
+            )
+
     def validate_detalles(self, value):
         if not value:
             raise serializers.ValidationError('Se requiere al menos un detalle.')
