@@ -91,6 +91,8 @@ Las 5 acciones que puede proponer el LLM: `registrar_movimiento`, `crear_product
 
 `_build_system_prompt()` inyecta el inventario actual del negocio en cada llamada.
 
+Todas las vistas del chat (`ChatMensajeView`, `ChatAudioView`, `ChatFotoView`, `ChatConfirmarView`) tienen `throttle_classes = [ChatRateThrottle]`.
+
 ### Autenticación y seguridad
 
 - JWT Bearer token en todos los endpoints excepto `registro/` y `login/`.
@@ -100,14 +102,37 @@ Las 5 acciones que puede proponer el LLM: `registrar_movimiento`, `crear_product
 - **Rate limiting:** anónimos 20/hora, usuarios 1000/día, chat 30/hora (`ChatRateThrottle`).
 - Password mínimo: **8 caracteres**.
 
-### Dashboard
+### Respuesta de login (`POST /api/auth/login/`)
 
-`GET /api/dashboard/` acepta `?fecha=YYYY-MM-DD` (sin parámetro = hoy).
-Respuesta incluye `fecha`, `ingresos`, `gastos`, `utilidad`, `stock_critico`, `ultimos_movimientos`.
+```json
+{
+  "access": "...",
+  "refresh": "...",
+  "usuario": { "id", "email", "nombre", "apellido" },
+  "negocio": { "id", "nombre", "tipo", "seed_color", "theme_mode" }
+}
+```
 
-### Registro
+### Dashboard (`GET /api/dashboard/?fecha=YYYY-MM-DD`)
 
-`POST /api/auth/registro/` acepta `negocio_seed_color` (hex `#RRGGBB`) para persistir el color de marca elegido por el usuario al crear la cuenta.
+Sin parámetro = hoy. Respuesta:
+
+```json
+{
+  "fecha": "YYYY-MM-DD",
+  "ingresos": "Decimal",
+  "gastos": "Decimal",
+  "utilidad": "Decimal",
+  "stock_critico": { "count": 0, "productos": [...] },
+  "ultimos_movimientos": [
+    { "id", "tipo", "motivo", "cantidad", "nota", "producto_nombre", "creado_por_nombre", "creado_en" }
+  ]
+}
+```
+
+### Registro (`POST /api/auth/registro/`)
+
+Acepta `negocio_seed_color` (hex `#RRGGBB`, default `#1976D2`) para persistir el color de marca elegido en el onboarding del frontend.
 
 ## Convenciones
 
@@ -117,11 +142,3 @@ Respuesta incluye `fecha`, `ingresos`, `gastos`, `utilidad`, `stock_critico`, `u
 - `DetalleVenta.subtotal` se recalcula en `save()` — no confiar en el valor del cliente
 - Variables de entorno siempre vía `python-decouple` (`config()`), nunca `os.environ`
 - Errores de servicios externos (Claude, Whisper) se loggean con `logger.exception()` y devuelven mensaje genérico al cliente — nunca `str(e)` en producción
-
-## Migraciones pendientes de aplicar en producción
-
-```bash
-source venv/bin/activate
-python manage.py migrate
-# Aplica: token_blacklist + 0003_movimiento_motivo
-```

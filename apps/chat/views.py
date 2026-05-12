@@ -109,6 +109,8 @@ class ChatFotoView(APIView):
 
 
 class ChatConfirmarView(APIView):
+    throttle_classes = [ChatRateThrottle]
+
     def post(self, request):
         accion = request.data.get('accion')
         datos = request.data.get('datos', {})
