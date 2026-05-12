@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -12,6 +14,8 @@ from .serializers import (
     RegistroSerializer,
     UsuarioSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class RegistroView(APIView):
@@ -56,4 +60,16 @@ class CambiarPasswordView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
+
+        # Invalidar todos los refresh tokens activos del usuario
+        try:
+            from rest_framework_simplejwt.token_blacklist.models import (
+                BlacklistedToken,
+                OutstandingToken,
+            )
+            for token in OutstandingToken.objects.filter(user=request.user):
+                BlacklistedToken.objects.get_or_create(token=token)
+        except Exception:
+            logger.exception('Error al blacklistear tokens tras cambio de contraseña')
+
         return Response({'detail': 'Contraseña actualizada correctamente.'})

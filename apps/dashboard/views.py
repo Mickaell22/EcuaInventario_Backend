@@ -1,3 +1,4 @@
+from datetime import date as date_type
 from decimal import Decimal
 
 from django.db.models import DecimalField, ExpressionWrapper, F, Sum
@@ -13,7 +14,21 @@ from apps.ventas.models import Venta
 class DashboardView(APIView):
     def get(self, request):
         negocio = request.user.negocio
-        hoy = timezone.now().date()
+
+        # Acepta ?fecha=YYYY-MM-DD; sin parámetro usa hoy
+        fecha_param = request.query_params.get('fecha')
+        if fecha_param:
+            try:
+                hoy = date_type.fromisoformat(fecha_param)
+            except ValueError:
+                from rest_framework import status
+                from rest_framework.response import Response
+                return Response(
+                    {'error': 'Formato de fecha inválido. Usa YYYY-MM-DD.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            hoy = timezone.now().date()
 
         ingresos = (
             Venta.objects.for_tenant(negocio)
@@ -22,9 +37,11 @@ class DashboardView(APIView):
             or Decimal('0')
         )
 
+        # Solo movimientos con motivo='compra' cuentan como gasto real
+        # Los ajustes de inventario (motivo='ajuste') no son gastos operativos
         gastos = (
             Movimiento.objects.for_tenant(negocio)
-            .filter(creado_en__date=hoy, tipo='entrada')
+            .filter(creado_en__date=hoy, tipo='entrada', motivo='compra')
             .aggregate(
                 total=Sum(
                     ExpressionWrapper(
@@ -50,6 +67,7 @@ class DashboardView(APIView):
 
         return Response(
             {
+                'fecha': hoy.isoformat(),
                 'ingresos': ingresos,
                 'gastos': gastos,
                 'utilidad': utilidad,

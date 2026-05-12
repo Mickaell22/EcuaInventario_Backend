@@ -48,7 +48,7 @@ PROVEEDORES REGISTRADOS:
 
 ACCIONES DISPONIBLES:
 1. registrar_movimiento — entradas o salidas de insumos
-   datos: producto(nombre), tipo(entrada|salida), cantidad(número), nota(opcional)
+   datos: producto(nombre), tipo(entrada|salida), cantidad(número), motivo(compra|ajuste para entradas; consumo|merma para salidas), nota(opcional)
 
 2. crear_producto — agregar nuevo producto o insumo
    datos: nombre, categoria(insumo|plato), costo, unidad, stock_minimo, precio_venta(solo platos)
@@ -80,7 +80,7 @@ def _parse_llm_response(text):
 # ── Procesamiento de entrada ─────────────────────────────────────────────────
 
 def procesar_mensaje(texto, negocio):
-    client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    client = Anthropic(api_key=settings.ANTHROPIC_API_KEY, timeout=30.0)
     message = client.messages.create(
         model=MODELO_HAIKU,
         max_tokens=512,
@@ -91,7 +91,7 @@ def procesar_mensaje(texto, negocio):
 
 
 def transcribir_audio(audio_file):
-    client = OpenAI(api_key=settings.OPENAI_API_KEY)
+    client = OpenAI(api_key=settings.OPENAI_API_KEY, timeout=60.0)
     transcript = client.audio.transcriptions.create(
         model='whisper-1',
         file=audio_file,
@@ -101,7 +101,7 @@ def transcribir_audio(audio_file):
 
 
 def procesar_foto(imagen_file, negocio):
-    client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    client = Anthropic(api_key=settings.ANTHROPIC_API_KEY, timeout=30.0)
     image_data = base64.standard_b64encode(imagen_file.read()).decode('utf-8')
     media_type = imagen_file.content_type or 'image/jpeg'
 
@@ -193,6 +193,7 @@ def _confirmar_movimiento(datos, negocio, usuario):
     tipo = datos['tipo']
     cantidad = Decimal(str(datos['cantidad']))
     nota = datos.get('nota', '')
+    motivo = datos.get('motivo', 'compra' if tipo == 'entrada' else 'consumo')
     delta = cantidad if tipo == 'entrada' else -cantidad
 
     with transaction.atomic():
@@ -205,6 +206,7 @@ def _confirmar_movimiento(datos, negocio, usuario):
             negocio=negocio,
             producto=producto_lock,
             tipo=tipo,
+            motivo=motivo,
             cantidad=cantidad,
             nota=nota,
             creado_por=usuario,

@@ -19,10 +19,11 @@ class RegistroSerializer(serializers.Serializer):
     # Negocio
     negocio_nombre = serializers.CharField(max_length=120)
     negocio_tipo = serializers.CharField(max_length=40, required=False, default='')
+    negocio_seed_color = serializers.CharField(max_length=7, required=False, default='#1976D2')
 
     # Usuario
     email = serializers.EmailField()
-    password = serializers.CharField(write_only=True, min_length=6)
+    password = serializers.CharField(write_only=True, min_length=8)
     nombre = serializers.CharField(max_length=80)
     apellido = serializers.CharField(max_length=80, required=False, default='')
 
@@ -36,6 +37,7 @@ class RegistroSerializer(serializers.Serializer):
             negocio = Negocio.objects.create(
                 nombre=validated_data['negocio_nombre'],
                 tipo=validated_data.get('negocio_tipo', ''),
+                seed_color=validated_data.get('negocio_seed_color', '#1976D2'),
             )
             usuario = Usuario.objects.create_user(
                 email=validated_data['email'],
@@ -57,7 +59,7 @@ class LoginSerializer(TokenObtainPairSerializer):
 
 class CambiarPasswordSerializer(serializers.Serializer):
     password_actual = serializers.CharField(write_only=True)
-    password_nuevo = serializers.CharField(write_only=True, min_length=6)
+    password_nuevo = serializers.CharField(write_only=True, min_length=8)
 
     def validate_password_actual(self, value):
         if not self.context['request'].user.check_password(value):

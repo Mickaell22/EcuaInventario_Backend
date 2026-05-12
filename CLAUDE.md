@@ -1,6 +1,4 @@
-# CLAUDE.md
-
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+# CLAUDE.md — EcuaInventario Backend
 
 ## Comandos esenciales
 
@@ -32,6 +30,8 @@ PostgreSQL local con usuario de app de mínimos privilegios:
 
 El `.env` no está en git. Copiar `.env.example` y completar `ANTHROPIC_API_KEY` y `OPENAI_API_KEY` para usar el Chat IA.
 
+**`DATABASE_URL` es obligatorio** — si no está seteada el servidor falla explícito (el fallback a SQLite fue eliminado intencionalmente).
+
 ## Arquitectura
 
 SaaS multitenancy para negocios gastronómicos. Cada negocio es un tenant aislado por FK — **no se usan schemas de PostgreSQL** (decisión de MVP; migrar a `django-tenants` cuando escale).
@@ -55,9 +55,9 @@ Todo ViewSet de negocio hereda `TenantViewSetMixin` (`apps/core/views.py`) **ant
 | App | Contenido |
 |---|---|
 | `apps/core` | `TenantModel`, `TenantViewSetMixin` — sin URLs ni migraciones propias |
-| `apps/autenticacion` | Custom `Usuario` (email como USERNAME_FIELD), JWT registro/login/perfil |
+| `apps/autenticacion` | Custom `Usuario` (email como USERNAME_FIELD), JWT registro/login/perfil/cambiar-password |
 | `apps/negocios` | Modelo `Negocio` (tenant raíz), endpoint GET/PATCH de configuración |
-| `apps/inventario` | `Producto` (insumo\|plato) + `Movimiento` (entradas/salidas de insumos) |
+| `apps/inventario` | `Producto` (insumo\|plato) + `Movimiento` (entradas/salidas de insumos con campo `motivo`) |
 | `apps/proveedores` | `Proveedor` con soft-delete (`activo=False`) |
 | `apps/ventas` | `Venta` + `DetalleVenta` — ventas de platos a clientes, separadas de movimientos |
 | `apps/dashboard` | Vista agregada: ventas del día, alertas de stock bajo, últimos movimientos |
@@ -70,36 +70,58 @@ Negocio
 ├── Usuario (AUTH_USER_MODEL)
 ├── Proveedor
 ├── Producto (categoria: insumo|plato)
-│   └── Movimiento (solo para insumos — consumo/compra, NO ventas)
+│   └── Movimiento (solo para insumos — motivo: compra|ajuste|consumo|merma)
 └── Venta
     └── DetalleVenta (snapshot de precio_unitario al momento de la venta)
 ```
 
-**Importante:** `Movimiento` y `Venta` son entidades distintas. Los movimientos trackean stock de insumos; las ventas registran revenue de platos. El dashboard suma `Venta.total` (no movimientos) para el total del día.
+**Importante:** `Movimiento` y `Venta` son entidades distintas. Los movimientos trackean stock de insumos; las ventas registran revenue de platos. El dashboard suma `Venta.total` (no movimientos) para los ingresos del día, y solo cuenta como gastos los movimientos con `motivo='compra'` (los ajustes de inventario NO son gastos).
 
 ### Chat IA (`apps/chat/services.py`)
 
 Flujo: texto/audio/foto → propuesta JSON → usuario confirma → `confirmar_accion()` escribe a BD.
 
-- **LLM:** `claude-haiku-4-5-20251001` vía Anthropic SDK
-- **Audio:** Whisper (`whisper-1`) vía OpenAI SDK — transcribe a texto y pasa al LLM
-- **Foto:** Claude Haiku con visión (imagen en base64) — extrae datos de facturas
+- **LLM:** `claude-haiku-4-5-20251001` vía Anthropic SDK — timeout 30s
+- **Audio:** Whisper (`whisper-1`) vía OpenAI SDK — timeout 60s
+- **Foto:** Claude Haiku con visión (imagen en base64) — timeout 30s
 - **El LLM nunca escribe directamente a la BD** — siempre pasa por `/api/chat/confirmar/`
+- **Archivos permitidos:** audio (mp3/mp4/wav/ogg/webm, máx 10 MB), foto (jpg/png/webp, máx 5 MB)
 
 Las 5 acciones que puede proponer el LLM: `registrar_movimiento`, `crear_producto`, `crear_proveedor`, `actualizar_producto`, `registrar_venta`.
 
-`_build_system_prompt()` inyecta el inventario actual del negocio en cada llamada para que el LLM use nombres exactos.
+`_build_system_prompt()` inyecta el inventario actual del negocio en cada llamada.
 
-### Autenticación
+### Autenticación y seguridad
 
-JWT Bearer token en todos los endpoints excepto `registro/` y `login/`. Configurado globalmente en `REST_FRAMEWORK` — no hace falta declararlo por vista. Access token: 8h. Refresh: 30 días con rotación.
+- JWT Bearer token en todos los endpoints excepto `registro/` y `login/`.
+- Access token: 8h. Refresh: 30d con rotación automática.
+- **Blacklist activa:** `BLACKLIST_AFTER_ROTATION=True` — los refresh tokens rotados quedan invalidados.
+- `CambiarPasswordView` invalida **todos** los refresh tokens activos del usuario al cambiar contraseña.
+- **Rate limiting:** anónimos 20/hora, usuarios 1000/día, chat 30/hora (`ChatRateThrottle`).
+- Password mínimo: **8 caracteres**.
 
-El registro (`POST /api/auth/registro/`) crea `Negocio` + `Usuario` en una transacción atómica y devuelve los tokens directamente.
+### Dashboard
+
+`GET /api/dashboard/` acepta `?fecha=YYYY-MM-DD` (sin parámetro = hoy).
+Respuesta incluye `fecha`, `ingresos`, `gastos`, `utilidad`, `stock_critico`, `ultimos_movimientos`.
+
+### Registro
+
+`POST /api/auth/registro/` acepta `negocio_seed_color` (hex `#RRGGBB`) para persistir el color de marca elegido por el usuario al crear la cuenta.
 
 ## Convenciones
 
 - PKs UUID en todos los modelos de negocio (`id = UUIDField(primary_key=True, default=uuid4)`)
 - Soft-delete en `Proveedor` y `Producto`: `activo=False`, nunca `DELETE` real
-- Stock se actualiza con `F('stock_actual') + delta` dentro de `transaction.atomic()` para evitar race conditions
-- `DetalleVenta.subtotal` se recalcula en `save()` — no confiar en el valor que envíe el cliente
+- Stock se actualiza con `F('stock_actual') + delta` dentro de `transaction.atomic()` + `select_for_update()` para evitar race conditions
+- `DetalleVenta.subtotal` se recalcula en `save()` — no confiar en el valor del cliente
 - Variables de entorno siempre vía `python-decouple` (`config()`), nunca `os.environ`
+- Errores de servicios externos (Claude, Whisper) se loggean con `logger.exception()` y devuelven mensaje genérico al cliente — nunca `str(e)` en producción
+
+## Migraciones pendientes de aplicar en producción
+
+```bash
+source venv/bin/activate
+python manage.py migrate
+# Aplica: token_blacklist + 0003_movimiento_motivo
+```

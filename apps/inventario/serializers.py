@@ -39,16 +39,19 @@ class MovimientoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Movimiento
-        fields = ['id', 'tipo', 'cantidad', 'nota', 'producto_nombre', 'creado_por_nombre', 'creado_en']
+        fields = ['id', 'tipo', 'motivo', 'cantidad', 'nota', 'producto_nombre', 'creado_por_nombre', 'creado_en']
         read_only_fields = ['id', 'creado_en']
 
 
 class MovimientoCreateSerializer(serializers.Serializer):
     tipo = serializers.ChoiceField(choices=['entrada', 'salida'])
+    motivo = serializers.CharField(required=False, allow_blank=True, default='')
     cantidad = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal('0.001'))
     nota = serializers.CharField(required=False, default='', allow_blank=True)
 
     def validate(self, attrs):
+        if not attrs.get('motivo'):
+            attrs['motivo'] = 'compra' if attrs['tipo'] == 'entrada' else 'consumo'
         producto = self.context['producto']
         if attrs['tipo'] == 'salida' and producto.stock_actual < attrs['cantidad']:
             raise serializers.ValidationError(
@@ -86,6 +89,7 @@ class MovimientoCreateSerializer(serializers.Serializer):
 class MovimientoCreateGlobalSerializer(serializers.Serializer):
     producto = serializers.PrimaryKeyRelatedField(queryset=Producto.objects.none())
     tipo = serializers.ChoiceField(choices=['entrada', 'salida'])
+    motivo = serializers.CharField(required=False, allow_blank=True, default='')
     cantidad = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal('0.001'))
     nota = serializers.CharField(required=False, default='', allow_blank=True)
 
@@ -98,6 +102,8 @@ class MovimientoCreateGlobalSerializer(serializers.Serializer):
             )
 
     def validate(self, attrs):
+        if not attrs.get('motivo'):
+            attrs['motivo'] = 'compra' if attrs['tipo'] == 'entrada' else 'consumo'
         if attrs['tipo'] == 'salida' and attrs['producto'].stock_actual < attrs['cantidad']:
             raise serializers.ValidationError(
                 {'cantidad': f'Stock insuficiente. Disponible: {attrs["producto"].stock_actual}'}

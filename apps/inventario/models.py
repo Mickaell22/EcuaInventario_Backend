@@ -40,6 +40,12 @@ class Movimiento(TenantModel):
         ('entrada', 'Entrada'),
         ('salida', 'Salida'),
     ]
+    MOTIVO_CHOICES = [
+        ('compra', 'Compra'),
+        ('ajuste', 'Ajuste de inventario'),
+        ('consumo', 'Consumo'),
+        ('merma', 'Merma / pérdida'),
+    ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     producto = models.ForeignKey(
@@ -48,6 +54,7 @@ class Movimiento(TenantModel):
         related_name='movimientos',
     )
     tipo = models.CharField(max_length=10, choices=TIPO_CHOICES)
+    motivo = models.CharField(max_length=10, choices=MOTIVO_CHOICES, blank=True, default='')
     cantidad = models.DecimalField(max_digits=10, decimal_places=3)
     nota = models.TextField(blank=True)
     creado_por = models.ForeignKey(
