@@ -8,7 +8,8 @@ import httpx
 from anthropic import Anthropic
 from django.conf import settings
 from django.db import transaction
-from django.db.models import F
+from django.db.models import DecimalField, ExpressionWrapper, F, Sum
+from django.utils import timezone
 from openai import OpenAI
 
 from apps.inventario.models import Movimiento, Producto
@@ -22,19 +23,67 @@ DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions'
 
 # ── Contexto y prompt ────────────────────────────────────────────────────────
 
+def _resumen_negocio(negocio):
+    hoy = timezone.now().date()
+    inicio_mes = hoy.replace(day=1)
+
+    def _ventas(desde):
+        return (
+            Venta.objects.for_tenant(negocio)
+            .filter(fecha__date__gte=desde)
+            .aggregate(t=Sum('total'))['t']
+            or Decimal('0')
+        )
+
+    def _gastos(desde):
+        return (
+            Movimiento.objects.for_tenant(negocio)
+            .filter(creado_en__date__gte=desde, tipo='entrada', motivo='compra')
+            .aggregate(
+                t=Sum(
+                    ExpressionWrapper(
+                        F('cantidad') * F('producto__costo'),
+                        output_field=DecimalField(max_digits=14, decimal_places=4),
+                    )
+                )
+            )['t']
+            or Decimal('0')
+        )
+
+    ventas_hoy, gastos_hoy = _ventas(hoy), _gastos(hoy)
+    ventas_mes, gastos_mes = _ventas(inicio_mes), _gastos(inicio_mes)
+    return (
+        f"Hoy ({hoy.strftime('%d/%m/%Y')}): ventas ${ventas_hoy:.2f}, "
+        f"gastos ${gastos_hoy:.2f}, utilidad ${ventas_hoy - gastos_hoy:.2f}\n"
+        f"Mes en curso: ventas ${ventas_mes:.2f}, "
+        f"gastos ${gastos_mes:.2f}, utilidad ${ventas_mes - gastos_mes:.2f}"
+    )
+
+
+def _linea_producto(p):
+    if p['categoria'] == 'plato':
+        precio = p['precio_venta'] or Decimal('0')
+        costo = p['costo'] or Decimal('0')
+        return (
+            f"- {p['nombre']} (plato, precio venta: ${precio:.2f}, "
+            f"costo: ${costo:.2f}, margen: ${precio - costo:.2f})"
+        )
+    bajo = ' [STOCK BAJO]' if p['stock_actual'] <= p['stock_minimo'] else ''
+    return (
+        f"- {p['nombre']} (insumo, stock: {p['stock_actual']} {p['unidad']}, "
+        f"mínimo: {p['stock_minimo']} {p['unidad']}){bajo}"
+    )
+
+
 def _build_system_prompt(negocio):
     productos = Producto.objects.for_tenant(negocio).filter(activo=True).values(
-        'nombre', 'categoria', 'stock_actual', 'unidad'
+        'nombre', 'categoria', 'stock_actual', 'unidad', 'costo', 'precio_venta', 'stock_minimo'
     )
     proveedores = Proveedor.objects.for_tenant(negocio).filter(activo=True).values_list(
         'nombre', flat=True
     )
 
-    productos_txt = '\n'.join(
-        f"- {p['nombre']} ({p['categoria']}, stock: {p['stock_actual']} {p['unidad']})"
-        for p in productos
-    ) or '(ninguno registrado)'
-
+    productos_txt = '\n'.join(_linea_producto(p) for p in productos) or '(ninguno registrado)'
     proveedores_txt = '\n'.join(f'- {n}' for n in proveedores) or '(ninguno registrado)'
 
     return f"""Eres un asistente de gestión de inventario para negocios gastronómicos en Ecuador.
@@ -42,6 +91,9 @@ Responde SOLO con un JSON válido, sin texto adicional ni bloques de código mar
 
 NEGOCIO: {negocio.nombre} ({negocio.tipo})
 FECHA: {date.today().strftime('%d/%m/%Y')}
+
+RESUMEN FINANCIERO:
+{_resumen_negocio(negocio)}
 
 PRODUCTOS REGISTRADOS:
 {productos_txt}
@@ -65,13 +117,17 @@ ACCIONES DISPONIBLES:
 5. registrar_venta — registrar venta de platos a clientes
    datos: detalles([{{"producto": nombre, "cantidad": número}}]), nota(opcional)
 
+6. responder — para preguntas informativas (cómo va el negocio, cuánto se vendió o gastó, qué insumos están bajos, cuál plato es más rentable, etc.)
+   No lleva datos. Pon la respuesta completa y concreta en lenguaje natural en el campo "resumen", usando los números reales del RESUMEN FINANCIERO y los datos de PRODUCTOS y PROVEEDORES de arriba.
+
 FORMATO DE RESPUESTA:
 {{
   "accion": "<accion>",
   "datos": {{ ... }},
-  "resumen": "<descripción breve en español de lo que se hará>"
+  "resumen": "<descripción breve en español de lo que se hará, o la respuesta a la pregunta>"
 }}
 
+Usa "responder" cuando el usuario haga una pregunta en lugar de pedir registrar algo.
 Si el mensaje no corresponde a ninguna acción responde con accion "no_reconocido" y explica amablemente en "resumen" qué puede hacer el asistente."""
 
 
