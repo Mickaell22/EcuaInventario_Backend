@@ -36,10 +36,11 @@ class ProductoSerializer(serializers.ModelSerializer):
 class MovimientoSerializer(serializers.ModelSerializer):
     creado_por_nombre = serializers.CharField(source='creado_por.nombre', read_only=True)
     producto_nombre = serializers.CharField(source='producto.nombre', read_only=True)
+    producto_unidad = serializers.CharField(source='producto.unidad', read_only=True)
 
     class Meta:
         model = Movimiento
-        fields = ['id', 'tipo', 'motivo', 'cantidad', 'nota', 'producto_nombre', 'creado_por_nombre', 'creado_en']
+        fields = ['id', 'tipo', 'motivo', 'cantidad', 'nota', 'producto_nombre', 'producto_unidad', 'creado_por_nombre', 'creado_en']
         read_only_fields = ['id', 'creado_en']
 
 
