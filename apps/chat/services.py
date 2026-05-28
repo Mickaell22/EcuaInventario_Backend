@@ -4,6 +4,7 @@ import re
 from datetime import date
 from decimal import Decimal
 
+import httpx
 from anthropic import Anthropic
 from django.conf import settings
 from django.db import transaction
@@ -15,6 +16,8 @@ from apps.proveedores.models import Proveedor
 from apps.ventas.models import DetalleVenta, Venta
 
 MODELO_HAIKU = 'claude-haiku-4-5-20251001'
+MODELO_DEEPSEEK = 'deepseek-chat'
+DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions'
 
 
 # ── Contexto y prompt ────────────────────────────────────────────────────────
@@ -80,14 +83,22 @@ def _parse_llm_response(text):
 # ── Procesamiento de entrada ─────────────────────────────────────────────────
 
 def procesar_mensaje(texto, negocio):
-    client = Anthropic(api_key=settings.ANTHROPIC_API_KEY, timeout=30.0)
-    message = client.messages.create(
-        model=MODELO_HAIKU,
-        max_tokens=512,
-        system=_build_system_prompt(negocio),
-        messages=[{'role': 'user', 'content': texto}],
+    response = httpx.post(
+        DEEPSEEK_URL,
+        headers={'Authorization': f'Bearer {settings.DEEPSEEK_API_KEY}'},
+        json={
+            'model': MODELO_DEEPSEEK,
+            'max_tokens': 512,
+            'messages': [
+                {'role': 'system', 'content': _build_system_prompt(negocio)},
+                {'role': 'user', 'content': texto},
+            ],
+        },
+        timeout=30.0,
     )
-    return _parse_llm_response(message.content[0].text)
+    response.raise_for_status()
+    contenido = response.json()['choices'][0]['message']['content']
+    return _parse_llm_response(contenido)
 
 
 def transcribir_audio(audio_file):

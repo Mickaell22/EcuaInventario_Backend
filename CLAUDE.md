@@ -14,6 +14,8 @@ python manage.py makemigrations <app>
 python manage.py migrate
 
 # Seed de datos de prueba (requiere negocio "Cevichería El Marino" existente)
+# Re-ejecutable: borra ventas/movimientos previos del negocio y los recrea
+# distribuidos en los últimos 3 días (compras, consumos, mermas y ventas).
 python manage.py seed
 
 # Verificar configuración
@@ -150,10 +152,13 @@ Sin parámetro = hoy. Respuesta:
   "utilidad": "Decimal",
   "stock_critico": { "count": 0, "productos": [...] },
   "ultimos_movimientos": [
-    { "id", "tipo", "motivo", "cantidad", "nota", "producto_nombre", "creado_por_nombre", "creado_en" }
+    { "id", "tipo", "motivo", "cantidad", "nota", "producto_nombre", "producto_unidad", "creado_por_nombre", "creado_en" }
   ]
 }
 ```
+
+- `stock_critico` filtra por `categoria='insumo'` (los platos no manejan stock, así que no cuentan como críticos aunque tengan `stock_actual=0`).
+- `ultimos_movimientos` usa `MovimientoSerializer`, que incluye `producto_unidad` (`source='producto.unidad'`) para que el Home muestre la unidad junto a la cantidad.
 
 ### Registro (`POST /api/auth/registro/`)
 
