@@ -56,6 +56,7 @@ class DashboardView(APIView):
 
         productos_criticos = Producto.objects.for_tenant(negocio).filter(
             activo=True,
+            categoria='insumo',
             stock_actual__lte=F('stock_minimo'),
         ).select_related('proveedor')
 
