@@ -128,6 +128,8 @@ FORMATO DE RESPUESTA:
 }}
 
 Usa "responder" cuando el usuario haga una pregunta en lugar de pedir registrar algo.
+NUNCA devuelvas crear_proveedor, crear_producto, registrar_movimiento o registrar_venta con datos vacíos o incompletos. Si faltan datos esenciales (nombre del proveedor o producto, cantidad o producto de un movimiento, etc.), devuelve accion "responder" con la pregunta de qué falta en "resumen".
+Ejemplo: si el usuario dice "agregar un proveedor" sin dar el nombre, responde {{"accion": "responder", "datos": {{}}, "resumen": "¿Cómo se llama el proveedor que deseas agregar?"}}.
 Si el mensaje no corresponde a ninguna acción responde con accion "no_reconocido" y explica amablemente en "resumen" qué puede hacer el asistente."""
 
 
@@ -289,11 +291,14 @@ def _confirmar_movimiento(datos, negocio, usuario):
 
 
 def _confirmar_crear_producto(datos, negocio):
+    nombre = (datos.get('nombre') or '').strip()
+    if not nombre:
+        raise ValueError('Indica al menos el nombre del producto.')
     proveedor = _buscar_proveedor(datos.get('proveedor'), negocio)
 
     producto = Producto.objects.create(
         negocio=negocio,
-        nombre=datos['nombre'],
+        nombre=nombre,
         categoria=datos.get('categoria', 'insumo'),
         costo=Decimal(str(datos.get('costo', 0))),
         unidad=datos.get('unidad', 'unidad'),
@@ -310,9 +315,12 @@ def _confirmar_crear_producto(datos, negocio):
 
 
 def _confirmar_crear_proveedor(datos, negocio):
+    nombre = (datos.get('nombre') or '').strip()
+    if not nombre:
+        raise ValueError('Indica al menos el nombre del proveedor.')
     proveedor = Proveedor.objects.create(
         negocio=negocio,
-        nombre=datos['nombre'],
+        nombre=nombre,
         telefono=datos.get('telefono', ''),
         email=datos.get('email', ''),
         contacto=datos.get('contacto', ''),
