@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from django.db.models import DecimalField, ExpressionWrapper, F, Sum
 from django.utils import timezone
+from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -21,8 +22,6 @@ class DashboardView(APIView):
             try:
                 hoy = date_type.fromisoformat(fecha_param)
             except ValueError:
-                from rest_framework import status
-                from rest_framework.response import Response
                 return Response(
                     {'error': 'Formato de fecha inválido. Usa YYYY-MM-DD.'},
                     status=status.HTTP_400_BAD_REQUEST,

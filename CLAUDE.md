@@ -1,4 +1,4 @@
-# CLAUDE.md — EcuaInventario Backend
+# CLAUDE.md — Facilito Backend
 
 ## Comandos esenciales
 
@@ -13,12 +13,37 @@ python manage.py runserver
 python manage.py makemigrations <app>
 python manage.py migrate
 
+# Seed de datos de prueba (requiere negocio "Cevichería El Marino" existente)
+python manage.py seed
+
 # Verificar configuración
 python manage.py check
 
 # Crear superusuario para el admin
 python manage.py createsuperuser
 ```
+
+## Deploy en Railway
+
+- **URL producción:** `https://web-production-8e7ef.up.railway.app`
+- **Proyecto Railway:** `Facilito` (ID `109ea15a-2e38-49e7-ae65-0ea71795886d`)
+- **Servicio web:** `web` | **BD:** `Postgres` (servicio `Postgres` con volumen persistente)
+- **Variables configuradas:** `SECRET_KEY`, `DEBUG=False`, `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`
+- Driver de BD: `psycopg[binary]>=3.1` (no `psycopg2-binary` — incompatible con Python 3.13 en Railway)
+
+### Ejecutar comandos contra la BD de Railway
+
+```bash
+source venv/bin/activate
+DATABASE_URL="postgresql://postgres:<PGPASSWORD>@zephyr.proxy.rlwy.net:34010/railway" python manage.py <comando>
+```
+
+> `PGPASSWORD` se obtiene de Railway → proyecto Facilito → servicio Postgres → Variables.
+
+### Credenciales de prueba (Railway)
+
+- **Email:** `dueno@marino.com` | **Contraseña:** `12345678`
+- **Negocio:** Cevichería El Marino
 
 ## Base de datos local
 
@@ -142,3 +167,4 @@ Acepta `negocio_seed_color` (hex `#RRGGBB`, default `#1976D2`) para persistir el
 - `DetalleVenta.subtotal` se recalcula en `save()` — no confiar en el valor del cliente
 - Variables de entorno siempre vía `python-decouple` (`config()`), nunca `os.environ`
 - Errores de servicios externos (Claude, Whisper) se loggean con `logger.exception()` y devuelven mensaje genérico al cliente — nunca `str(e)` en producción
+- Paginación activa: `DEFAULT_PAGINATION_CLASS = PageNumberPagination`, `PAGE_SIZE = 50`. Los endpoints de lista devuelven `{"count": N, "next": "...", "previous": "...", "results": [...]}`. El Flutter ya maneja este formato en `product_repository.dart` y `supplier_repository.dart`.
