@@ -33,6 +33,12 @@ class ChatMensajeView(APIView):
         try:
             propuesta = services.procesar_mensaje(texto, request.user.negocio)
             return Response(services._format_for_flutter(propuesta))
+        except services.ChatError as e:
+            logger.warning('ChatError en ChatMensajeView: %s', e)
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         except Exception:
             logger.exception('Error en ChatMensajeView')
             return Response(

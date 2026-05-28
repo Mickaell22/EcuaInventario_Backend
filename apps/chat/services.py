@@ -21,6 +21,10 @@ MODELO_DEEPSEEK = 'deepseek-chat'
 DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions'
 
 
+class ChatError(Exception):
+    """Error del asistente con un mensaje seguro para mostrar al usuario."""
+
+
 # ── Contexto y prompt ────────────────────────────────────────────────────────
 
 def _resumen_negocio(negocio):
@@ -106,13 +110,13 @@ ACCIONES DISPONIBLES:
    datos: producto(nombre), tipo(entrada|salida), cantidad(número), motivo(compra|ajuste para entradas; consumo|merma para salidas), nota(opcional)
 
 2. crear_producto — agregar nuevo producto o insumo
-   datos: nombre, categoria(insumo|plato), costo, unidad, stock_minimo, precio_venta(solo platos)
+   datos: nombre, categoria(insumo|plato), costo, unidad, stock_minimo, precio_venta(solo platos), proveedor(nombre, opcional)
 
 3. crear_proveedor — registrar nuevo proveedor
    datos: nombre, telefono(opcional), email(opcional), contacto(opcional)
 
 4. actualizar_producto — modificar datos de un producto existente
-   datos: producto(nombre actual), campos a actualizar(precio_venta, costo, stock_minimo, unidad)
+   datos: producto(nombre actual), campos a actualizar(nombre, precio_venta, costo, stock_minimo, unidad)
 
 5. registrar_venta — registrar venta de platos a clientes
    datos: detalles([{{"producto": nombre, "cantidad": número}}]), nota(opcional)
@@ -135,26 +139,41 @@ Si el mensaje no corresponde a ninguna acción responde con accion "no_reconocid
 
 def _parse_llm_response(text):
     text = re.sub(r'```(?:json)?\s*', '', text).strip('`').strip()
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if match:
+            return json.loads(match.group(0))
+        raise ChatError('No entendí la respuesta del asistente. Intenta reformular tu mensaje.')
 
 
 # ── Procesamiento de entrada ─────────────────────────────────────────────────
 
 def procesar_mensaje(texto, negocio):
-    response = httpx.post(
-        DEEPSEEK_URL,
-        headers={'Authorization': f'Bearer {settings.DEEPSEEK_API_KEY}'},
-        json={
-            'model': MODELO_DEEPSEEK,
-            'max_tokens': 512,
-            'messages': [
-                {'role': 'system', 'content': _build_system_prompt(negocio)},
-                {'role': 'user', 'content': texto},
-            ],
-        },
-        timeout=30.0,
-    )
-    response.raise_for_status()
+    try:
+        response = httpx.post(
+            DEEPSEEK_URL,
+            headers={'Authorization': f'Bearer {settings.DEEPSEEK_API_KEY}'},
+            json={
+                'model': MODELO_DEEPSEEK,
+                'max_tokens': 1024,
+                'response_format': {'type': 'json_object'},
+                'messages': [
+                    {'role': 'system', 'content': _build_system_prompt(negocio)},
+                    {'role': 'user', 'content': texto},
+                ],
+            },
+            timeout=30.0,
+        )
+        response.raise_for_status()
+    except httpx.TimeoutException as e:
+        raise ChatError('El asistente tardó demasiado en responder. Intenta nuevamente.') from e
+    except httpx.HTTPStatusError as e:
+        raise ChatError('El servicio de IA no está disponible en este momento.') from e
+    except httpx.HTTPError as e:
+        raise ChatError('No se pudo conectar con el asistente. Intenta nuevamente.') from e
+
     contenido = response.json()['choices'][0]['message']['content']
     return _parse_llm_response(contenido)
 

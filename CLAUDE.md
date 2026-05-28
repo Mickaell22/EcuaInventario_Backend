@@ -30,8 +30,9 @@ python manage.py createsuperuser
 - **URL producción:** `https://web-production-8e7ef.up.railway.app`
 - **Proyecto Railway:** `Facilito` (ID `109ea15a-2e38-49e7-ae65-0ea71795886d`)
 - **Servicio web:** `web` | **BD:** `Postgres` (servicio `Postgres` con volumen persistente)
-- **Variables configuradas:** `SECRET_KEY`, `DEBUG=False`, `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`
+- **Variables configuradas:** `SECRET_KEY`, `DEBUG=False`, `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, `DEEPSEEK_API_KEY` (chat de texto). **No configuradas aún:** `OPENAI_API_KEY` (audio/Whisper) ni `ANTHROPIC_API_KEY` (foto/visión).
 - Driver de BD: `psycopg[binary]>=3.1` (no `psycopg2-binary` — incompatible con Python 3.13 en Railway)
+- `httpx==0.27.2` fijado en `requirements.txt` (lo usa el chat para llamar a DeepSeek; pin compatible con los SDK de anthropic/openai).
 
 ### Ejecutar comandos contra la BD de Railway
 
@@ -55,7 +56,7 @@ PostgreSQL local con usuario de app de mínimos privilegios:
 - **Usuario:** `ecuainventario_app` / `Ecua2026!App`
 - Configurado en `.env` vía `DATABASE_URL`
 
-El `.env` no está en git. Copiar `.env.example` y completar `ANTHROPIC_API_KEY` y `OPENAI_API_KEY` para usar el Chat IA.
+El `.env` no está en git. Copiar `.env.example` y completar `DEEPSEEK_API_KEY` (chat de texto) y, opcionalmente, `OPENAI_API_KEY` (audio) y `ANTHROPIC_API_KEY` (foto/visión) para usar el Chat IA.
 
 **`DATABASE_URL` es obligatorio** — si no está seteada el servidor falla explícito (el fallback a SQLite fue eliminado intencionalmente).
 
@@ -88,7 +89,7 @@ Todo ViewSet de negocio hereda `TenantViewSetMixin` (`apps/core/views.py`) **ant
 | `apps/proveedores` | `Proveedor` con soft-delete (`activo=False`) |
 | `apps/ventas` | `Venta` + `DetalleVenta` — ventas de platos a clientes, separadas de movimientos |
 | `apps/dashboard` | Vista agregada: ventas del día, alertas de stock bajo, últimos movimientos |
-| `apps/chat` | Integración Anthropic + Whisper; toda la lógica en `services.py` |
+| `apps/chat` | Chat IA: DeepSeek (texto, temporal) + Whisper (audio) + Claude (foto); toda la lógica en `services.py` |
 
 ### Modelo de datos resumido
 
@@ -108,15 +109,15 @@ Negocio
 
 Flujo: texto/audio/foto → propuesta JSON → usuario confirma → `confirmar_accion()` escribe a BD.
 
-- **LLM:** `claude-haiku-4-5-20251001` vía Anthropic SDK — timeout 30s
-- **Audio:** Whisper (`whisper-1`) vía OpenAI SDK — timeout 60s
-- **Foto:** Claude Haiku con visión (imagen en base64) — timeout 30s
+- **LLM (texto):** DeepSeek `deepseek-chat` vía API compatible OpenAI, llamada directa con `httpx` (no el SDK de OpenAI, que daba conflicto de versión `proxies`) — timeout 30s. **Temporal, para pruebas.** Requiere `DEEPSEEK_API_KEY`.
+- **Audio:** Whisper (`whisper-1`) vía OpenAI SDK — timeout 60s. Requiere `OPENAI_API_KEY` (no configurada en Railway).
+- **Foto:** Claude Haiku con visión (imagen en base64) vía Anthropic SDK — timeout 30s. Requiere `ANTHROPIC_API_KEY` (no configurada). DeepSeek no tiene visión.
 - **El LLM nunca escribe directamente a la BD** — siempre pasa por `/api/chat/confirmar/`
 - **Archivos permitidos:** audio (mp3/mp4/wav/ogg/webm, máx 10 MB), foto (jpg/png/webp, máx 5 MB)
 
-Las 5 acciones que puede proponer el LLM: `registrar_movimiento`, `crear_producto`, `crear_proveedor`, `actualizar_producto`, `registrar_venta`.
+Acciones que puede proponer el LLM: `registrar_movimiento`, `crear_producto`, `crear_proveedor`, `actualizar_producto`, `registrar_venta`, y `responder` (preguntas informativas — la respuesta va en `resumen`, no escribe a BD; el frontend la muestra como texto).
 
-`_build_system_prompt()` inyecta el inventario actual del negocio en cada llamada.
+`_build_system_prompt()` inyecta en cada llamada el inventario del negocio (con costo, precio y margen de los platos, y marca de stock bajo) más `_resumen_negocio()` (ventas/gastos/utilidad de hoy y del mes en curso). El prompt instruye al LLM a pedir datos faltantes con `responder` en vez de proponer registros incompletos; además `_confirmar_crear_proveedor` y `_confirmar_crear_producto` validan que el nombre no esté vacío (`ValueError` → 400).
 
 Todas las vistas del chat (`ChatMensajeView`, `ChatAudioView`, `ChatFotoView`, `ChatConfirmarView`) tienen `throttle_classes = [ChatRateThrottle]`.
 
